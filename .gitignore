@@ -25,3 +25,6 @@ vice.log
 # Build directories
 build/
 dist/
+
+# C64 ROMs (copyrighted - never commit)
+roms/
