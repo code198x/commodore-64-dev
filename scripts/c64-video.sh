@@ -166,17 +166,18 @@ OUT_EXT="${OUT_EXT,,}"
 
 case "$OUT_EXT" in
     mp4)
-        FFMPEG_CODEC="-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p"
+        # crop=trunc(iw/2)*2:trunc(ih/2)*2 ensures even dimensions for h264
+        FFMPEG_CODEC="-vf crop=trunc(iw/2)*2:trunc(ih/2)*2 -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p"
         ;;
     webm)
-        FFMPEG_CODEC="-c:v libvpx-vp9 -crf 30 -b:v 0"
+        FFMPEG_CODEC="-vf crop=trunc(iw/2)*2:trunc(ih/2)*2 -c:v libvpx-vp9 -crf 30 -b:v 0"
         ;;
     gif)
-        FFMPEG_CODEC="-vf fps=25,scale=320:-1:flags=lanczos"
+        FFMPEG_CODEC="-vf fps=25,scale=320:-2:flags=lanczos"
         ;;
     *)
         echo "Warning: Unknown output format '$OUT_EXT', using mp4 settings"
-        FFMPEG_CODEC="-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p"
+        FFMPEG_CODEC="-vf crop=trunc(iw/2)*2:trunc(ih/2)*2 -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p"
         ;;
 esac
 
