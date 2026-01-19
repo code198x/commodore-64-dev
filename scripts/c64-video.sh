@@ -226,9 +226,32 @@ fi
 # Run VICE with GUI (needed for window capture)
 # Note: Don't use -geometry as GTK3 VICE ignores it and may fail to create window
 # +VICIIshowstatusbar hides the status bar for cleaner capture
+# -sound enables audio, -sounddev pulse outputs to PulseAudio for capture
 echo "Starting VICE emulator..."
+
+# Start PulseAudio if not running (needed for audio capture)
+pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+sleep 1
+
+# Create a null sink for capturing audio output
+# VICE outputs to this sink, and we capture from its monitor
+pactl load-module module-null-sink sink_name=vice_capture sink_properties=device.description=VICECapture 2>/dev/null || true
+sleep 0.5
+
+# Get the monitor source name for capturing
+AUDIO_SOURCE="vice_capture.monitor"
+
+# Set VICE to output to our capture sink
+export PULSE_SINK=vice_capture
+
+# Create temp file for audio recording
+TEMP_AUDIO="/tmp/vice_audio_$$.wav"
+
 timeout ${TOTAL_TIME}s x64sc \
-    +sound \
+    -sound \
+    -sounddev wav \
+    -soundarg "$TEMP_AUDIO" \
+    -soundrate 48000 \
     +VICIIshowstatusbar \
     -autostartprgmode 1 \
     $JOYSTICK_OPTS \
@@ -237,6 +260,23 @@ VICE_PID=$!
 
 # Wait for VICE to start and create window (GTK3 init takes ~3-4 seconds)
 sleep 4
+
+# Move VICE's audio output to our capture sink
+# Find VICE's sink input and redirect it
+for i in {1..10}; do
+    SINK_INPUT=$(pactl list sink-inputs short 2>/dev/null | grep -i "x64\|vice" | head -1 | cut -f1)
+    if [[ -n "$SINK_INPUT" ]]; then
+        pactl move-sink-input "$SINK_INPUT" vice_capture 2>/dev/null && echo "Redirected VICE audio to capture sink"
+        break
+    fi
+    # If no named match, try to find any sink input
+    SINK_INPUT=$(pactl list sink-inputs short 2>/dev/null | head -1 | cut -f1)
+    if [[ -n "$SINK_INPUT" ]]; then
+        pactl move-sink-input "$SINK_INPUT" vice_capture 2>/dev/null && echo "Redirected audio to capture sink"
+        break
+    fi
+    sleep 0.5
+done
 
 # Find VICE window (try both "VICE" and "x64" names)
 VICE_WINDOW=""
@@ -291,7 +331,8 @@ if [[ -n "$VICE_WINDOW" ]]; then
     fi
 fi
 
-# Capture video
+# Capture video only (audio is being recorded by VICE to WAV)
+TEMP_VIDEO="/tmp/vice_video_$$.mp4"
 ffmpeg -y \
     -f x11grab \
     -framerate "$FPS" \
@@ -299,8 +340,31 @@ ffmpeg -y \
     -i ":${DISPLAY_NUM}+${GRAB_X},${GRAB_Y}" \
     -t "$DURATION" \
     $FFMPEG_CODEC \
-    "$OUTPUT_FILE" \
+    "$TEMP_VIDEO" \
     2>/dev/null
+
+# Wait for VICE to finish writing audio
+sleep 1
+kill $VICE_PID 2>/dev/null || true
+sleep 1
+
+# Merge video with VICE's audio recording
+if [[ -f "$TEMP_AUDIO" ]] && [[ -s "$TEMP_AUDIO" ]]; then
+    echo "Merging video with SID audio..."
+    ffmpeg -y \
+        -i "$TEMP_VIDEO" \
+        -i "$TEMP_AUDIO" \
+        -c:v copy \
+        -c:a aac -b:a 192k \
+        -shortest \
+        "$OUTPUT_FILE" \
+        2>/dev/null
+    rm -f "$TEMP_VIDEO" "$TEMP_AUDIO"
+else
+    echo "Warning: No audio recorded, using video only"
+    mv "$TEMP_VIDEO" "$OUTPUT_FILE"
+    rm -f "$TEMP_AUDIO"
+fi
 
 # Report result
 if [[ -f "$OUTPUT_FILE" ]]; then

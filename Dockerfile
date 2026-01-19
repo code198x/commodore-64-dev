@@ -21,6 +21,10 @@ RUN apt-get update && apt-get install -y \
     xdotool \
     openbox \
     ffmpeg \
+    # Audio capture support
+    pulseaudio \
+    alsa-utils \
+    libasound2-plugins \
     # Text editors
     vim \
     nano \
